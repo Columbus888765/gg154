@@ -1,0 +1,234 @@
+getgenv().GG_SCRIPT_ACTIVE = false
+
+for _,v in pairs(getconnections(game:GetService("RunService").Heartbeat)) do
+	pcall(function() v:Disconnect() end)
+end
+
+for _,v in pairs(workspace:GetDescendants()) do
+	if v.Name == "gg1" then
+		pcall(function() v:Destroy() end)
+	end
+end
+
+getgenv().GG_SCRIPT_ACTIVE = true
+
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local UserInputService = game:GetService("UserInputService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+local player = Players.LocalPlayer
+
+local block = Instance.new("Part")
+block.Name = "gg1"
+block.Size = Vector3.new(18, 2, 10)
+block.Anchored = true
+block.CanCollide = false
+block.Transparency = 1
+block.Parent = workspace
+
+local SPEED = 350
+local OFFSET = Vector3.new(0, 10, 0)
+local IDLE_OFFSET = Vector3.new(0, 50, 0)
+local ISLAND_DISTANCE = 10000
+
+local active = true
+local currentTarget = nil
+local followingPlayer = true
+
+local enemyIndex = 1
+local lastSwitch = 0
+
+local raidRunning = false
+local wasOnIsland = false
+
+local fruits = {
+	"Quake-Quake","Magma-Magma","Light-Light","Ice-Ice","Flame-Flame",
+	"Dark-Dark","Rubber-Rubber","Bomb-Bomb","Spike-Spike","Blade-Blade",
+	"Smoke-Smoke","Spring-Spring","Sand-Sand","Spin-Spin","Rocket-Rocket",
+	"Diamond-Diamond","Ghost-Ghost","Eagle-Eagle"
+}
+
+local commF = ReplicatedStorage:WaitForChild("Remotes"):WaitForChild("CommF_")
+
+local function getChar()
+	return player.Character or player.CharacterAdded:Wait()
+end
+
+local function snapAbovePlayer()
+	local char = getChar()
+	local hrp = char:WaitForChild("HumanoidRootPart")
+	block.Position = hrp.Position + OFFSET
+end
+
+local function getIslandTopPosition(model)
+	if model:IsA("BasePart") then
+		return model.Position + Vector3.new(0, model.Size.Y/2 + 5, 0)
+	elseif model:IsA("Model") then
+		local cf, size = model:GetBoundingBox()
+		return cf.Position + Vector3.new(0, size.Y/2 + 5, 0)
+	end
+	return nil
+end
+
+local function getHighestIslandTarget()
+	local raid = workspace:FindFirstChild("Map")
+	if not raid then return nil end
+
+	local map = raid:FindFirstChild("RaidMap")
+	if not map then return nil end
+
+	local highest = 0
+	for _, obj in pairs(map:GetChildren()) do
+		local num = tonumber(obj.Name:match("%d+"))
+		if num and num > highest then
+			highest = num
+		end
+	end
+
+	if highest == 0 then return nil end
+
+	local island = map:FindFirstChild("RaidIsland" .. highest)
+	if not island then return nil end
+
+	return getIslandTopPosition(island), island
+end
+
+local function getEnemies()
+	local folder = workspace:FindFirstChild("Enemies")
+	if not folder then return {} end
+
+	local list = {}
+	for _, v in pairs(folder:GetChildren()) do
+		local hum = v:FindFirstChildOfClass("Humanoid")
+		local hrp = v:FindFirstChild("HumanoidRootPart")
+		if hum and hrp and hum.Health > 0 then
+			table.insert(list, v)
+		end
+	end
+	return list
+end
+
+local function startRaid()
+	if raidRunning then return end
+	raidRunning = true
+
+	local fruit = fruits[math.random(1, #fruits)]
+
+	commF:InvokeServer("LoadFruit", fruit)
+	task.wait(0)
+
+	commF:InvokeServer("RaidsNpc", "Select", "Flame")
+	task.wait(0)
+
+	local btn
+	repeat
+		task.wait(0)
+		local map = workspace:FindFirstChild("Map")
+		local bc = map and map:FindFirstChild("Boat Castle")
+		btn = bc and bc:GetChildren()[5]
+	until btn
+
+	local cd = btn:FindFirstChildWhichIsA("ClickDetector", true)
+	if cd then
+		if fireclickdetector then
+			fireclickdetector(cd)
+		else
+			cd.MouseClick:Fire()
+		end
+	end
+end
+
+snapAbovePlayer()
+task.spawn(startRaid)
+
+UserInputService.InputBegan:Connect(function(input, gp)
+	if gp then return end
+	if input.KeyCode == Enum.KeyCode.H then
+		active = not active
+		currentTarget = nil
+		followingPlayer = true
+	end
+	if input.KeyCode == Enum.KeyCode.G then
+		getgenv().GG_SCRIPT_ACTIVE = false
+		block:Destroy()
+	end
+end)
+
+RunService.Heartbeat:Connect(function(dt)
+	if not getgenv().GG_SCRIPT_ACTIVE then return end
+
+	local char = getChar()
+	local hrp = char:FindFirstChild("HumanoidRootPart")
+	if not hrp then return end
+
+	local islandTarget, islandModel = getHighestIslandTarget()
+	local enemies = getEnemies()
+
+	if islandTarget then
+		wasOnIsland = true
+	else
+		if wasOnIsland then
+			wasOnIsland = false
+			currentTarget = nil
+			raidRunning = false
+			task.spawn(startRaid)
+		end
+	end
+
+	if not active then
+		block.Position = hrp.Position + IDLE_OFFSET
+		currentTarget = nil
+		followingPlayer = true
+		return
+	end
+
+	if followingPlayer then
+		block.Position = hrp.Position + OFFSET
+	end
+
+	if #enemies > 0 then
+		local enemy = enemies[enemyIndex]
+		if enemy then
+			local ehrp = enemy:FindFirstChild("HumanoidRootPart")
+			if ehrp then
+				currentTarget = (ehrp.CFrame * CFrame.new(0, 0, 5)).Position
+				followingPlayer = false
+			end
+		end
+	else
+		if tick() - lastSwitch >= 1 then
+			enemyIndex += 1
+			if enemyIndex > #enemies then
+				enemyIndex = 1
+			end
+			lastSwitch = tick()
+		end
+
+		if islandTarget and (hrp.Position - islandTarget).Magnitude <= ISLAND_DISTANCE then
+			currentTarget = islandTarget
+			followingPlayer = false
+		else
+			currentTarget = nil
+			followingPlayer = true
+		end
+	end
+
+	if currentTarget then
+		local dir = currentTarget - block.Position
+		local dist = dir.Magnitude
+
+		if dist > 2 then
+			block.Position += dir.Unit * math.min(SPEED * dt, dist)
+		else
+			block.Position = currentTarget
+		end
+	end
+
+	hrp.AssemblyLinearVelocity = Vector3.zero
+	hrp.AssemblyAngularVelocity = Vector3.zero
+
+	if not followingPlayer and currentTarget then
+		hrp.CFrame = CFrame.new(block.Position + OFFSET)
+	end
+end)
